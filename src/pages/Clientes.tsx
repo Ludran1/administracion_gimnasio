@@ -6,6 +6,7 @@ import { ClientesTable } from "@/features/clientes/ClientesTable";
 import { ClienteForm } from "@/features/clientes/ClienteForm";
 import { ClienteEditForm } from "@/features/clientes/ClienteEditForm";
 import { RenovarMembresiaModal } from "@/features/clientes/RenovarMembresiaModal";
+import { GrupoManagementModal } from "@/features/clientes/GrupoManagementModal";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { useClientes } from "@/features/clientes/useClientes";
 import type { Database } from "@/lib/supabase";
@@ -38,6 +39,10 @@ export default function Clientes() {
   const [isRenovarOpen, setIsRenovarOpen] = useState(false);
   const [clienteARenovar, setClienteARenovar] = useState<ClienteRow | null>(null);
 
+  // Estado para el modal de grupo
+  const [isGrupoOpen, setIsGrupoOpen] = useState(false);
+  const [clienteParaGrupo, setClienteParaGrupo] = useState<ClienteRow | null>(null);
+
   const handleRenovar = (cliente: ClienteRow) => {
     setClienteARenovar(cliente);
     setIsRenovarOpen(true);
@@ -46,6 +51,11 @@ export default function Clientes() {
   const handleRenovacionExitosa = () => {
     // Recargar la lista de clientes
     fetchClientes();
+  };
+
+  const handleGrupo = (cliente: ClienteRow) => {
+    setClienteParaGrupo(cliente);
+    setIsGrupoOpen(true);
   };
 
   const handleEditSubmit = async (values: any) => {
@@ -69,6 +79,7 @@ export default function Clientes() {
         onEdit={handleEdit}
         onDelete={handleDelete}
         onRenovar={handleRenovar}
+        onGrupo={handleGrupo}
       />
 
       {/* Modal para CREAR nuevo cliente */}
@@ -99,6 +110,15 @@ export default function Clientes() {
         cliente={clienteARenovar}
         membresiasDisponibles={membresiasDisponibles}
         onRenovacionExitosa={handleRenovacionExitosa}
+      />
+
+      {/* Modal para GESTIÓN DE GRUPO */}
+      <GrupoManagementModal
+        isOpen={isGrupoOpen}
+        onOpenChange={setIsGrupoOpen}
+        cliente={clienteParaGrupo}
+        allClientes={filteredClientes}
+        onGrupoUpdated={() => fetchClientes()}
       />
 
       <ConfirmationDialog

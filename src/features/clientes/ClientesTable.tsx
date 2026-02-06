@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Search, Edit, Trash2, Calendar, AlertTriangle, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { Search, Edit, Trash2, Calendar, AlertTriangle, ChevronLeft, ChevronRight, RefreshCw, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Database } from "@/lib/supabase";
 import { useMembershipExpiration } from "@/hooks/useMembershipExpiration";
@@ -33,6 +33,7 @@ interface ClientesTableProps {
   onEdit: (cliente: ClienteRow) => void;
   onDelete: (id: string) => void;
   onRenovar?: (cliente: ClienteRow) => void;
+  onGrupo?: (cliente: ClienteRow) => void;
 }
 
 export function ClientesTable({
@@ -42,6 +43,7 @@ export function ClientesTable({
   onEdit,
   onDelete,
   onRenovar,
+  onGrupo,
 }: ClientesTableProps) {
   const { getMembershipStatus, getStatusColor, getStatusText } = useMembershipExpiration();
   const [page, setPage] = useState(1);
@@ -167,6 +169,16 @@ export function ClientesTable({
                             <RefreshCw className="h-4 w-4 text-green-600" />
                           </Button>
                         )}
+                        {onGrupo && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => onGrupo(cliente)}
+                            title="Gestionar grupo"
+                          >
+                            <Users className="h-4 w-4 text-blue-500" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -228,6 +240,15 @@ export function ClientesTable({
                           onClick={() => onRenovar(cliente)}
                         >
                           <RefreshCw className="h-4 w-4 text-green-600" />
+                        </Button>
+                      )}
+                      {onGrupo && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onGrupo(cliente)}
+                        >
+                          <Users className="h-4 w-4 text-blue-500" />
                         </Button>
                       )}
                       <Button
