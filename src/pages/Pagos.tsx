@@ -19,12 +19,14 @@ import {
   AlertCircle,
   User,
   Calendar,
-  Receipt
+  Receipt,
+  TrendingUp
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO, startOfDay, endOfDay, subMonths } from "date-fns";
 import { es } from "date-fns/locale";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface Pago {
   id: string;
@@ -67,6 +69,17 @@ export default function Pagos() {
   const [busqueda, setBusqueda] = useState("");
   const [filtroEstado, setFiltroEstado] = useState<string>("todos");
   
+  // Filtros de fecha
+  const currentDate = new Date();
+  const [filtroTipo, setFiltroTipo] = useState<'mensual' | 'rango'>('mensual');
+  const [mesSeleccionado, setMesSeleccionado] = useState<string>(currentDate.getMonth().toString());
+  const [anioSeleccionado, setAnioSeleccionado] = useState<string>(currentDate.getFullYear().toString());
+  const [fechaInicio, setFechaInicio] = useState<string>("");
+  const [fechaFin, setFechaFin] = useState<string>("");
+
+  // Datos para la gráfica de ingresos
+  const [datosIngresos, setDatosIngresos] = useState<{name: string, total: number}[]>([]);
+  
   // Modal de nuevo pago de cuota
   const [modalPagoAbierto, setModalPagoAbierto] = useState(false);
   const [pagoSeleccionado, setPagoSeleccionado] = useState<Pago | null>(null);
@@ -107,6 +120,56 @@ export default function Pagos() {
         .order('nombre');
       
       setClientes(clientesData || []);
+      
+      // Cargar resumen de transacciones para la gráfica (últimos 6 meses)
+      const fechaLimite = subMonths(new Date(), 6).toISOString();
+      const { data: transaccionesData } = await supabase
+        .from('transacciones')
+        .select('monto, fecha_transaccion')
+        .gte('fecha_transaccion', fechaLimite)
+        .order('fecha_transaccion', { ascending: false })
+        .limit(2000);
+
+      if (transaccionesData) {
+        // Agrupar por mes usando clave canónica YYYY-MM
+        const ingresosPorMes: Record<string, number> = {};
+        
+        // Inicializar últimos 6 meses en 0
+        for (let i = 5; i >= 0; i--) {
+          const d = subMonths(new Date(), i);
+          const key = format(d, 'yyyy-MM');
+          ingresosPorMes[key] = 0;
+        }
+
+        // Sumar transacciones
+        transaccionesData.forEach(t => {
+          // Parse fecha localmente
+          const fecha = new Date(t.fecha_transaccion);
+          const key = format(fecha, 'yyyy-MM');
+          
+          if (ingresosPorMes[key] !== undefined) {
+             ingresosPorMes[key] += Number(t.monto);
+          }
+        });
+
+        // Convertir a formato de visualización
+        const datosGrafica = Object.entries(ingresosPorMes)
+          .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+          .map(([key, total]) => {
+            // Reconstruir fecha desde la key (año-mes) para asegurar el mes correcto visualmente
+            // Se asume día 15 para evitar problemas de timezone al inicio/fin de mes al formatear
+            const [year, month] = key.split('-').map(Number);
+            const date = new Date(year, month - 1, 15); 
+            
+            const nombreMes = format(date, 'MMM yyyy', { locale: es });
+            return {
+              name: nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1),
+              total
+            };
+          });
+
+        setDatosIngresos(datosGrafica);
+      }
 
     } catch (error: any) {
       console.error('Error:', error);
@@ -238,14 +301,33 @@ export default function Pagos() {
     
     const coincideEstado = filtroEstado === "todos" || pago.estado === filtroEstado;
     
-    return coincideBusqueda && coincideEstado;
+    // Filtro de fecha
+    let coincideFecha = true;
+    const fechaPago = parseISO(pago.created_at);
+
+    if (filtroTipo === 'mensual') {
+      const inicioMes = startOfMonth(new Date(parseInt(anioSeleccionado), parseInt(mesSeleccionado)));
+      const finMes = endOfMonth(new Date(parseInt(anioSeleccionado), parseInt(mesSeleccionado)));
+      coincideFecha = isWithinInterval(fechaPago, { start: startOfDay(inicioMes), end: endOfDay(finMes) });
+    } else if (filtroTipo === 'rango' && fechaInicio && fechaFin) {
+      // Ajustamos las fechas para cubrir todo el día
+      // fechaInicio se toma a las 00:00:00 del día local
+      // fechaFin se toma a las 23:59:59 del día local
+      // Como el input date devuelve YYYY-MM-DD, al hacer new Date() + startOfDay aseguramos comparación correcta
+      const inicio = startOfDay(parseISO(fechaInicio));
+      const fin = endOfDay(parseISO(fechaFin));
+      coincideFecha = isWithinInterval(fechaPago, { start: inicio, end: fin });
+    }
+
+    return coincideBusqueda && coincideEstado && coincideFecha;
   });
 
+  // Calculate summary based on filtered data ONLY
   const resumen = {
-    totalPendiente: pagos.reduce((acc, p) => acc + (p.monto_total - p.monto_pagado), 0),
-    totalCobrado: pagos.reduce((acc, p) => acc + p.monto_pagado, 0),
-    clientesConDeuda: pagos.filter(p => p.estado !== 'pagado').length,
-    pagosCompletos: pagos.filter(p => p.estado === 'pagado').length
+    totalPendiente: pagosFiltrados.reduce((acc, p) => acc + (p.monto_total - p.monto_pagado), 0),
+    totalCobrado: pagosFiltrados.reduce((acc, p) => acc + p.monto_pagado, 0),
+    clientesConDeuda: pagosFiltrados.filter(p => p.estado !== 'pagado').length,
+    pagosCompletos: pagosFiltrados.filter(p => p.estado === 'pagado').length
   };
 
   return (
@@ -325,8 +407,85 @@ export default function Pagos() {
       </div>
 
       {/* Filtros */}
+      {/* Filtros */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="pt-6 space-y-4">
+          {/* Controles de Fecha */}
+          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center p-4 bg-muted/40 rounded-lg">
+             <div className="flex items-center gap-2">
+                <Button 
+                  variant={filtroTipo === 'mensual' ? "default" : "outline"} 
+                  onClick={() => setFiltroTipo('mensual')}
+                  size="sm"
+                >
+                  Mensual
+                </Button>
+                <Button 
+                  variant={filtroTipo === 'rango' ? "default" : "outline"} 
+                  onClick={() => setFiltroTipo('rango')}
+                  size="sm"
+                >
+                  Rango
+                </Button>
+             </div>
+
+             {filtroTipo === 'mensual' ? (
+               <div className="flex gap-2">
+                 <Select value={mesSeleccionado} onValueChange={setMesSeleccionado}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Mes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <SelectItem key={i} value={i.toString()}>
+                        {format(new Date(2024, i, 1), 'MMMM', { locale: es })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                 </Select>
+
+                 <Select value={anioSeleccionado} onValueChange={setAnioSeleccionado}>
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue placeholder="Año" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 5 }, (_, i) => {
+                      const year = new Date().getFullYear() - 2 + i;
+                      return (
+                        <SelectItem key={year} value={year.toString()}>
+                          {year}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                 </Select>
+               </div>
+             ) : (
+               <div className="flex items-center gap-2">
+                 <div className="grid gap-1.5">
+                   <Label htmlFor="fechaInicio" className="text-xs">Desde</Label>
+                   <Input 
+                      id="fechaInicio"
+                      type="date" 
+                      value={fechaInicio} 
+                      onChange={(e) => setFechaInicio(e.target.value)}
+                      className="w-[140px]"
+                    />
+                 </div>
+                 <div className="grid gap-1.5">
+                   <Label htmlFor="fechaFin" className="text-xs">Hasta</Label>
+                   <Input 
+                      id="fechaFin"
+                      type="date" 
+                      value={fechaFin} 
+                      onChange={(e) => setFechaFin(e.target.value)}
+                      className="w-[140px]"
+                    />
+                 </div>
+               </div>
+             )}
+          </div>
+
           <div className="flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -566,6 +725,49 @@ export default function Pagos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* Gráfica de Ingresos */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-emerald-600" />
+            <CardTitle>Ingresos Mensuales</CardTitle>
+          </div>
+          <CardDescription>
+            Evolución de los ingresos en los últimos 6 meses
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={datosIngresos}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis 
+                  dataKey="name" 
+                  tick={{ fontSize: 12 }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis 
+                  tick={{ fontSize: 12 }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => `S/ ${value}`}
+                />
+                <Tooltip 
+                  formatter={(value: number) => [`S/ ${value.toFixed(2)}`, 'Ingresos']}
+                  cursor={{ fill: 'rgba(0,0,0,0.05)' }}
+                />
+                <Bar 
+                  dataKey="total" 
+                  fill="#10b981" 
+                  radius={[4, 4, 0, 0]} 
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

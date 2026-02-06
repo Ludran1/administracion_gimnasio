@@ -66,7 +66,7 @@ export const ClientAuthProvider = ({ children }: { children: React.ReactNode }) 
         .from("clientes")
         .select("*, membresia:membresias(caracteristicas)")
         .eq("email", email)
-        .single();
+        .maybeSingle();
       
       if (error) {
         console.error("Error fetching client data:", error);
